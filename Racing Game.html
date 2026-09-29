@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Highway Rush</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #080f20;
+    color: #edf4ff;
+    font-family: system-ui, sans-serif;
+  }
+  main { width: min(94vw, 420px); padding: 16px 0; }
+  h1 { margin: 0; font-size: 28px; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  small { color: #9aaecb; }
+  .stats { text-align: right; font-weight: 700; }
+  .stage {
+    position: relative;
+    border: 2px solid #293957;
+    border-radius: 18px;
+    overflow: hidden;
+  }
+  canvas {
+    width: 100%;
+    display: block;
+    background: #172033;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #060d20dc;
+    padding: 24px;
+    text-align: center;
+  }
+  .overlay[hidden] { display: none; }
+  h2 { font-size: 32px; margin: 0 0 10px; }
+  p { line-height: 1.6; color: #b8c7de; }
+  button {
+    border: 0;
+    border-radius: 12px;
+    padding: 15px 22px;
+    background: #42e5a4;
+    color: #092219;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:hover { filter: brightness(1.12); }
+  button:focus-visible { outline: 3px solid white; outline-offset: 2px; }
+  .controls { display: flex; gap: 10px; margin-top: 12px; }
+  .controls button { flex: 1; background: #243451; color: white; }
+  footer { text-align: center; font-size: 12px; color: #9aaecb; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Highway Rush</h1><small>Endless traffic challenge</small></div>
+    <div class="stats">
+      <div>Score: <span id="score">0</span></div>
+      <small>Best: <span id="best">0</span></small>
+    </div>
+  </header>
+
+<div class="stage">
+    <canvas id="game" width="400" height="580"
+      aria-label="Highway racing game: steer left and right to avoid traffic">
+      Your browser needs canvas support to play.
+    </canvas>
+    <div id="overlay" class="overlay">
+      <h2 id="title">Ready to race?</h2>
+      <p id="message">Dodge the traffic.<br>The longer you survive, the faster it gets!</p>
+      <button id="start">Start racing</button>
+    </div>
+  </div>
+
+<div class="controls">
+    <button id="left" aria-label="Steer left">◀</button>
+    <button id="pause" aria-label="Pause or resume game">Pause</button>
+    <button id="right" aria-label="Steer right">▶</button>
+  </div>
+  <footer>← → or A / D to steer · Space to pause</footer>
+</main>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const overlay = document.getElementById("overlay");
+const titleEl = document.getElementById("title");
+const messageEl = document.getElementById("message");
+const startButton = document.getElementById("start");
+const pauseButton = document.getElementById("pause");
+
+const lanes = [100, 200, 300];
+const colors = ["#ff657c", "#ffc857", "#a78bfa", "#60a5fa"];
+let best = 0;
+
+try {
+  const saved = Number(localStorage.getItem("highway-rush-best"));
+  if (Number.isFinite(saved) && saved >= 0) best = Math.floor(saved);
+} catch {
+  // The game also works when browser storage is unavailable.
+}
+bestEl.textContent = best;
+
+let state = "ready";
+let lane = 1;
+let playerX = lanes[lane];
+let enemies = [];
+let elapsed = 0;
+let score = 0;
+let stripeOffset = 0;
+let spawnTimer = 0.8;
+let lastTime = null;
+
+function showOverlay(title, message, button) {
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  startButton.textContent = button;
+  overlay.hidden = false;
+}
+
+function startGame() {
+  lane = 1;
+  playerX = lanes[lane];
+  enemies = [];
+  elapsed = 0;
+  score = 0;
+  stripeOffset = 0;
+  spawnTimer = 0.8;
+  scoreEl.textContent = "0";
+  pauseButton.textContent = "Pause";
+  overlay.hidden = true;
+  state = "playing";
+  lastTime = null;
+}
+
+function steer(direction) {
+  if (state !== "playing") return;
+  lane = Math.max(0, Math.min(2, lane + direction));
+}
+
+function togglePause() {
+  if (state === "playing") {
+    state = "paused";
+    pauseButton.textContent = "Resume";
+    showOverlay("Paused", "Take a breath. Your race is waiting.", "Resume");
+  } else if (state === "paused") {
+    state = "playing";
+    overlay.hidden = true;
+    pauseButton.textContent = "Pause";
+    lastTime = null;
+  }
+}
+
+function crash() {
+  state = "over";
+  if (score > best) {
+    best = score;
+    bestEl.textContent = best;
+    try {
+      localStorage.setItem("highway-rush-best", String(best));
+    } catch {
+      // High scores remain available for this session.
+    }
+  }
+  showOverlay("Race over!", `Your score: ${score}. Ready for another run?`, "Race again");
+}
+
+function drawCar(x, y, color, player = false) {
+  ctx.fillStyle = "#0005";
+  ctx.fillRect(x - 25, y + 7, 54, 80);
+
+ctx.fillStyle = "#080c14";
+  ctx.fillRect(x - 28, y + 12, 9, 20);
+  ctx.fillRect(x + 19, y + 12, 9, 20);
+  ctx.fillRect(x - 28, y + 52, 9, 20);
+  ctx.fillRect(x + 19, y + 52, 9, 20);
+
+ctx.fillStyle = color;
+  ctx.fillRect(x - 23, y, 46, 80);
+
+ctx.fillStyle = "#10273c";
+  ctx.fillRect(x - 17, y + 17, 34, 18);
+  ctx.fillRect(x - 16, y + 54, 32, 13);
+
+ctx.fillStyle = "#ffffff66";
+  ctx.fillRect(x - 3, y + 2, 6, 13);
+  ctx.fillRect(x - 3, y + 36, 6, 16);
+
+ctx.fillStyle = player ? "#e8fff8" : "#fff4bb";
+  ctx.fillRect(x - 19, y + 3, 10, 5);
+  ctx.fillRect(x + 9, y + 3, 10, 5);
+
+ctx.fillStyle = "#ff334e";
+  ctx.fillRect(x - 19, y + 73, 9, 5);
+  ctx.fillRect(x + 10, y + 73, 9, 5);
+}
+
+function draw() {
+  ctx.fillStyle = "#14392e";
+  ctx.fillRect(0, 0, 400, 580);
+  ctx.fillStyle = "#222c3e";
+  ctx.fillRect(50, 0, 300, 580);
+
+for (let y = -80 + stripeOffset; y < 580; y += 80) {
+    ctx.fillStyle = "#ecf0f5";
+    ctx.fillRect(43, y, 7, 40);
+    ctx.fillRect(350, y, 7, 40);
+    ctx.fillStyle = "#ef6575";
+    ctx.fillRect(43, y + 40, 7, 40);
+    ctx.fillRect(350, y + 40, 7, 40);
+
+ctx.fillStyle = "#9aa7bb";
+    ctx.fillRect(148, y, 4, 38);
+    ctx.fillRect(248, y, 4, 38);
+  }
+
+for (const enemy of enemies) {
+    drawCar(lanes[enemy.lane], enemy.y, enemy.color);
+  }
+  drawCar(playerX, 470, "#42e5a4", true);
+
+ctx.fillStyle = "#0b122acc";
+  ctx.fillRect(118, 10, 164, 30);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText(`LEVEL ${1 + Math.floor(elapsed / 15)}`, 200, 30);
+}
+
+function update(dt) {
+  elapsed += dt;
+  score = Math.floor(elapsed * 10);
+  scoreEl.textContent = score;
+
+const speed = Math.min(540, 210 + elapsed * 5);
+  stripeOffset = (stripeOffset + speed * dt) % 80;
+
+// Smooth, frame-rate-independent steering.
+  const targetX = lanes[lane];
+  const travel = 720 * dt;
+  playerX += Math.sign(targetX - playerX) *
+    Math.min(Math.abs(targetX - playerX), travel);
+
+spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    enemies.push({
+      lane: Math.floor(Math.random() * 3),
+      y: -90,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+    // Keep enough vertical separation to leave an escape route.
+    spawnTimer = Math.max(0.68, 1.2 - elapsed * 0.007);
+  }
+
+for (const enemy of enemies) {
+    enemy.y += speed * dt;
+    const overlapX = Math.abs(lanes[enemy.lane] - playerX) < 42;
+    const overlapY = enemy.y + 74 > 476 && enemy.y + 6 < 544;
+    if (overlapX && overlapY) {
+      crash();
+      break;
+    }
+  }
+  enemies = enemies.filter(enemy => enemy.y < 600);
+}
+
+function frame(timestamp) {
+  const dt = lastTime === null ? 0 :
+    Math.min((timestamp - lastTime) / 1000, 0.033);
+  lastTime = timestamp;
+  if (state === "playing") update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+document.getElementById("left").addEventListener("click", () => steer(-1));
+document.getElementById("right").addEventListener("click", () => steer(1));
+pauseButton.addEventListener("click", togglePause);
+startButton.addEventListener("click", () => {
+  if (state === "paused") togglePause();
+  else startGame();
+});
+
+document.addEventListener("keydown", event => {
+  const key = event.key.toLowerCase();
+  if (["arrowleft", "arrowright", "a", "d"].includes(key)) {
+    event.preventDefault();
+    if (!event.repeat) steer(key === "arrowleft" || key === "a" ? -1 : 1);
+  } else if (event.code === "Space" &&
+             event.target.tagName !== "BUTTON") {
+    event.preventDefault();
+    if (!event.repeat) togglePause();
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state === "playing") togglePause();
+});
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

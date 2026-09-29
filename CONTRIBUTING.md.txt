@@ -1,0 +1,13 @@
+# Contributing to Highway Rush
+
+Thank you for your interest in contributing to Highway Rush!
+
+Highway Rush is a simple browser-based endless traffic racing game built with HTML, CSS, and JavaScript.
+
+## Getting Started
+
+1. Fork the repository.
+2. Clone your fork:
+
+```bash
+   git clone https://github.com/vijayak24/Racing-Game/CONTRIBUTING.md
